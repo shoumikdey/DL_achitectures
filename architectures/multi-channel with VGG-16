@@ -1,0 +1,165 @@
+import tensorflow as tf
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import os
+import cv2
+from sklearn.model_selection import train_test_split
+import sklearn.preprocessing
+import joblib
+import datetime, os
+
+df = pd.read_csv('/content/drive/My Drive/datasets/PM/<dataset>.csv') #insert dataset here
+df2 = df[['PM25','Label', 'Colorfulness_non_sky', 'Entropy_non_sky', 'CoV', 'R_avg_sky', 'G_avg_sky', 'B_avg_sky', 'avg_sky', 'Colorfulness_sky', 'Entropy_sky', 'CoV_sky', 'RMS_Contrast', 'Edge_Count']]
+df2.head()
+
+# plot the graph using the default estimator mean 
+sns.countplot(x ='Label_Name', data = df)
+
+df2.info()
+
+fig, ax = plt.subplots()
+fig.set_size_inches(15,10)
+sns.heatmap(df2.corr(), cmap='coolwarm',ax=ax,annot=True,linewidths=2)
+
+img = cv2.cvtColor(cv2.imread('/content/drive/My Drive/datasets/PM/Beijing/2014_06_07_0604.jpg'), cv2.COLOR_BGR2GRAY) #2014_07_03_0624.jpg 2014_01_17_0726.jpg
+plt.imshow(img, cmap='gray')
+plt.show()
+
+img_edge = cv2.Canny(img, 60, 100)
+plt.imshow(img_edge)
+plt.show()
+edge_count = np.count_nonzero(img_edge)
+print(edge_count)
+
+def getEdges(img):
+    img = cv2.cvtColor(cv2.imread('/content/drive/My Drive/datasets/PM/Beijing/'+img), cv2.COLOR_BGR2GRAY)
+    img_edge = cv2.Canny(img, 60, 100)
+    return np.count_nonzero(img_edge)
+
+for i in df['Name']:
+    df.loc[df['Name']==i, 'Edge_Count'] = getEdges(i)
+
+df.head()
+
+df2 = df[['PM25','Label','Label_Name', 'Colorfulness_non_sky', 'Entropy_non_sky', 'CoV', 'R_avg_sky', 'G_avg_sky', 'B_avg_sky', 'avg_sky', 'Colorfulness_sky', 'Entropy_sky', 'CoV_sky', 'RMS_Contrast', 'Edge_Count']]
+fig, ax = plt.subplots()
+fig.set_size_inches(15,10)
+sns.heatmap(df2.corr(), cmap='coolwarm',ax=ax,annot=True,linewidths=2)
+
+label_one_hot = pd.get_dummies(df.Label, prefix='Label')
+label_one_hot.tail()
+
+cloud_status_one_hot = pd.get_dummies(df.Cloud_Status, prefix='CloudStatus')
+cloud_status_one_hot.tail()
+
+dataX = df[['Name','Colorfulness_non_sky', 'Entropy_non_sky', 'CoV','Colorfulness_sky', 'Entropy_sky', 'CoV_sky', 'RMS_Contrast', 'Edge_Count']]
+#dataX = df[['Name', 'CoV_sky', 'RMS_Contrast', 'Edge_Count']]
+dataX = dataX.join(cloud_status_one_hot)
+dataX.tail()
+
+X_train, X_test, Y_train, Y_test = train_test_split(dataX, label_one_hot, test_size = 0.2, random_state = 42, shuffle = True)
+
+mms = sklearn.preprocessing.StandardScaler()
+X_train[X_train.columns[1:9]] = mms.fit_transform(X_train[X_train.columns[1:9]])
+
+X_train.head()
+
+mms2 = sklearn.preprocessing.StandardScaler()
+X_test[X_test.columns[1:9]] = mms.fit_transform(X_test[X_test.columns[1:9]])
+Y_test.head()
+
+def getModel(shape_param, shape_img=(224,224,3)):
+  input1 = tf.keras.layers.Input(shape=(shape_param,))
+  dense1 = tf.keras.layers.Dense(units = 4096, activation='relu', )(input1)
+  drp1 = tf.keras.layers.Dropout(0.4)(dense1)
+  dense2 = tf.keras.layers.Dense(units = 2048, activation='relu')(drp1)
+  drp1 = tf.keras.layers.Dropout(0.4)(dense1)
+  dense2 = tf.keras.layers.Dense(units = 2048, activation='relu')(drp1)
+  drp1 = tf.keras.layers.Dropout(0.4)(dense1)
+  dense2 = tf.keras.layers.Dense(units = 1024, activation='relu')(drp1)
+  drp1 = tf.keras.layers.Dropout(0.4)(dense1)
+  dense2 = tf.keras.layers.Dense(units = 512, activation='relu')(drp1)
+  output1 = tf.keras.layers.Dropout(0.4)(dense2)
+
+  #VGG-16 network starts here
+  input = tf.keras.layers.Input(shape=shape_img)
+  input2 = tf.keras.layers.Conv2D(filters=64,kernel_size=(3,3),padding="same", activation="relu")(input)
+  conv1 = tf.keras.layers.Conv2D(filters=64,kernel_size=(3,3),padding="same", activation="relu")(input2)
+  mp1 = tf.keras.layers.MaxPool2D(pool_size=(2,2),strides=(2,2))(conv1)
+
+  conv2_1 = tf.keras.layers.Conv2D(filters=128,kernel_size=(3,3),padding="same", activation="relu")(mp1)
+  conv2_2 = tf.keras.layers.Conv2D(filters=128,kernel_size=(3,3),padding="same", activation="relu")(conv2_1)
+  mp2 = tf.keras.layers.MaxPool2D(pool_size=(2,2),strides=(2,2))(conv2_2)
+
+  conv3_1 = tf.keras.layers.Conv2D(filters=256,kernel_size=(3,3),padding="same", activation="relu")(mp2)
+  conv3_2 = tf.keras.layers.Conv2D(filters=256,kernel_size=(3,3),padding="same", activation="relu")(conv3_1)
+  conv3_3 = tf.keras.layers.Conv2D(filters=256,kernel_size=(3,3),padding="same", activation="relu")(conv3_2)
+  mp3 = tf.keras.layers.MaxPool2D(pool_size=(2,2),strides=(2,2))(conv3_3)
+
+  conv4_1 = tf.keras.layers.Conv2D(filters=512,kernel_size=(3,3),padding="same", activation="relu")(mp3)
+  conv4_2 = tf.keras.layers.Conv2D(filters=512,kernel_size=(3,3),padding="same", activation="relu")(conv4_1)
+  conv4_3 = tf.keras.layers.Conv2D(filters=512,kernel_size=(3,3),padding="same", activation="relu")(conv4_2)
+  mp4 = tf.keras.layers.MaxPool2D(pool_size=(2,2),strides=(2,2))(conv4_3)
+
+  conv5_1 = tf.keras.layers.Conv2D(filters=512,kernel_size=(3,3),padding="same", activation="relu")(mp4)
+  conv5_2 = tf.keras.layers.Conv2D(filters=512,kernel_size=(3,3),padding="same", activation="relu")(conv5_1)
+  conv5_3 = tf.keras.layers.Conv2D(filters=512,kernel_size=(3,3),padding="same", activation="relu")(conv5_2)
+  mp5 = tf.keras.layers.MaxPool2D(pool_size=(2,2),strides=(2,2))(conv5_3)
+
+  flatten = tf.keras.layers.Flatten()(mp5)
+  dense1_1 = tf.keras.layers.Dense(units=4096,activation="relu")(flatten)
+  output2 = tf.keras.layers.Dense(units=4096, activation="relu")(dense1_1)
+  
+  concat = tf.keras.layers.concatenate([output1, output2])
+  dense3 = tf.keras.layers.Dense(units=512, activation='relu')(concat)
+  drp = tf.keras.layers.Dropout(0.5)(dense3)
+  output_final = tf.keras.layers.Dense(units=6, activation = 'softmax')(drp)
+  
+  model = tf.keras.models.Model(inputs = [input1, input], outputs = output_final)
+  return model
+
+image_filenames = X_train.pop('Name')
+
+train_images = []
+for img in image_filenames:
+  train_images.append(cv2.resize(cv2.cvtColor(cv2.imread('/content/drive/My Drive/datasets/PM/Beijing/'+img), cv2.COLOR_BGR2RGB),(224,224)))
+train_images = np.asarray(train_images)/255.0
+print(len(train_images))
+
+model = getModel(len(X_train.keys()))
+model.summary()
+model.compile(loss='categorical_crossentropy', 
+              optimizer = tf.keras.optimizers.Adam(lr=0.001), 
+              metrics=['accuracy'])
+
+test_image_filenames = X_test.pop('Name')
+
+test_images = []
+for img in test_image_filenames:
+  test_images.append(cv2.resize(cv2.cvtColor(cv2.imread('/content/drive/My Drive/datasets/PM/Beijing/'+img), cv2.COLOR_BGR2RGB),(224,224)))
+test_images = np.asarray(test_images)/255.0
+print(len(test_images))
+
+save_model = tf.keras.callbacks.ModelCheckpoint("model_1.h5", monitor='val_accuracy', verbose=1, save_best_only=True, save_weights_only=False, mode='auto', period=1)
+early = tf.keras.callbacks.EarlyStopping(monitor='val_accuracy', min_delta=0, patience=10, verbose=1, mode='auto')
+logdir = os.path.join("logs", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+tensorboard_callback = tf.keras.callbacks.TensorBoard(logdir, histogram_freq=1)
+model.fit(x=[X_train.to_numpy(), train_images], 
+          y = Y_train.to_numpy(), 
+          epochs=150, 
+          verbose = 1, 
+          validation_data=([X_test.to_numpy(), test_images], Y_test.to_numpy()),
+          use_multiprocessing=True)
+
+yhat = model.predict([X_test.to_numpy(), test_images])
+
+yhat
+
+c = 0
+print("Label, Image")
+for i in yhat:
+  print(np.argmax(i), test_image_filenames.values[c])
+  c +=1
+
